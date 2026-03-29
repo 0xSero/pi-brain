@@ -1,0 +1,51 @@
+{
+	"name": "@0xsero/pi-brain",
+	"version": "0.1.0",
+	"description": "Privacy-first dataset extraction from AI coding sessions — Pi extension + source-agnostic core",
+	"type": "module",
+	"keywords": ["pi-package"],
+	"pi": {
+		"extensions": ["./dist/plugins/pi/index.js"]
+	},
+	"main": "./dist/core/index.js",
+	"types": "./dist/core/index.d.ts",
+	"exports": {
+		".": {
+			"types": "./dist/core/index.d.ts",
+			"import": "./dist/core/index.js"
+		}
+	},
+	"bin": {
+		"pi-brain": "./dist/cli.js"
+	},
+	"files": ["dist", "docs"],
+	"scripts": {
+		"clean": "rm -rf dist",
+		"build": "tsc",
+		"check": "biome check .",
+		"check:fix": "biome check --write .",
+		"test": "vitest run",
+		"test:watch": "vitest",
+		"typecheck": "tsc --noEmit",
+		"prepublishOnly": "npm run clean && npm run build"
+	},
+	"peerDependencies": {
+		"@mariozechner/pi-coding-agent": "*",
+		"@sinclair/typebox": "*"
+	},
+	"devDependencies": {
+		"@biomejs/biome": "^1.9.4",
+		"@types/node": "^22.10.0",
+		"typescript": "^5.7.3",
+		"vitest": "^3.0.0"
+	},
+	"author": "0xSero",
+	"license": "MIT",
+	"repository": {
+		"type": "git",
+		"url": "git+https://github.com/0xSero/pi-brain.git"
+	},
+	"engines": {
+		"node": ">=20.6.0"
+	}
+}

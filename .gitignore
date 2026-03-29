@@ -1,0 +1,6 @@
+node_modules/
+dist/
+test-output/
+.pi-private-data/
+*.tsbuildinfo
+.DS_Store
