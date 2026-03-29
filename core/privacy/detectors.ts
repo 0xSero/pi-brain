@@ -68,7 +68,8 @@ const BUILT_IN_DETECTORS: ReadonlyArray<DetectorDef> = [
 	// Phone numbers (international and US formats)
 	{
 		category: "phone",
-		pattern: /(?:\+?1[-.\s]?)?\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}\b/g,
+		pattern:
+			/(?<![A-Za-z0-9])(?:\+1[-.\s]+)?(?:\(\d{3}\)[-.\s]*\d{3}[-.\s]+\d{4}|\d{3}[-.\s]+\d{3}[-.\s]+\d{4})(?![A-Za-z0-9])/g,
 	},
 	// IPv4 addresses (excluding common non-sensitive ones like 127.0.0.1, 0.0.0.0)
 	{

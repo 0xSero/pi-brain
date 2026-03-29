@@ -19,10 +19,26 @@ describe("detectors", () => {
 		expect(spans[0].category).toBe("email");
 	});
 
-	it("detects phone numbers", () => {
-		const text = "Call me at 555-123-4567 or (555) 987-6543";
+	it("detects common phone number formats", () => {
+		const text = "Call 555-123-4567, (555) 987-6543, or +1 555 123 4567";
 		const spans = detectAll(text, ["phone"]);
-		expect(spans.length).toBe(2);
+		expect(spans.map((span) => span.rawValue)).toEqual([
+			"555-123-4567",
+			"(555) 987-6543",
+			"+1 555 123 4567",
+		]);
+	});
+
+	it("does not detect timestamps as phone numbers", () => {
+		const text = "2026-02-22 09:50:10.123456";
+		const spans = detectAll(text, ["phone"]);
+		expect(spans).toEqual([]);
+	});
+
+	it("does not detect comma-delimited numeric handles as phone numbers", () => {
+		const text = "field-trial-handle=123,456,789,000";
+		const spans = detectAll(text, ["phone"]);
+		expect(spans).toEqual([]);
 	});
 
 	it("detects JWTs", () => {

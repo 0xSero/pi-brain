@@ -33,6 +33,20 @@ export interface PrivacyConfig {
 	readonly customPatterns?: Readonly<Record<string, string>>;
 }
 
+/** Configuration for the anonymization pass applied after redaction. */
+export interface AnonymizeConfig {
+	/** Maximum timestamp jitter in milliseconds. Defaults to 30 minutes. */
+	readonly timestampJitterMs?: number;
+	/** Additional strings to strip (e.g. custom usernames, org names). */
+	readonly additionalStrips?: ReadonlyArray<string>;
+	/** Whether to anonymize session IDs. Defaults to true. */
+	readonly anonymizeIds?: boolean;
+	/** Whether to fuzz timestamps. Defaults to true. */
+	readonly fuzzTimestamps?: boolean;
+	/** Whether to strip paths from metadata. Defaults to true. */
+	readonly stripPaths?: boolean;
+}
+
 /** Configuration for the optional structured reviewer (OpenAI-compatible endpoint). */
 export interface ReviewerConfig {
 	/** Whether structured review is enabled. Defaults to false. */
@@ -86,6 +100,7 @@ export type UploadConfig = HuggingFaceUploadConfig | HttpUploadConfig;
 /** Top-level pi-brain configuration. */
 export interface PiBrainConfig {
 	readonly privacy?: PrivacyConfig;
+	readonly anonymize?: AnonymizeConfig;
 	readonly reviewer?: ReviewerConfig;
 	readonly export?: ExportConfig;
 	readonly upload?: UploadConfig;
