@@ -4,9 +4,21 @@
  * Claude Code source plugin — reads JSONL sessions from
  * ~/.claude/projects/<project>/<session>.jsonl
  *
- * Storage format: each line is a JSON event with a "type" field.
- * Messages use types "user", "assistant", "tool_result".
- * Content blocks use the same structure as Anthropic's API.
+ * Real storage format (verified from live data):
+ *   - Sessions live in ~/.claude/projects/
+ *   - Each project dir is named with the path where dashes replace slashes,
+ *     e.g. "-Users-sero-ai-pi-brain"
+ *   - Inside each project dir are JSONL files named by UUID
+ *   - Each line is a JSON envelope with fields:
+ *       parentUuid, isSidechain, userType, cwd, sessionId,
+ *       version, type, timestamp, uuid, ...
+ *   - Entry types: "user", "assistant", "system", "progress",
+ *       "file-history-snapshot", "queue-operation", "last-prompt"
+ *   - "user" type: message.content is a string
+ *   - "assistant" type: message.content is an array of blocks:
+ *       {type:"text", text:...}, {type:"thinking", ...}, {type:"tool_use", ...}
+ *   - "system" type: hook summaries and context (skip for messages)
+ *   - "progress", "file-history-snapshot", "queue-operation", "last-prompt": skip
  */
 
 import { readFileSync } from "node:fs";
@@ -20,14 +32,24 @@ import {
 	sessionIdFromPath,
 } from "../helpers.js";
 
-function getClaudeDirs(): string[] {
+/** Entry types that carry actual conversation messages. */
+const MESSAGE_TYPES = new Set(["user", "assistant"]);
+
+/** Entry types to skip entirely — not conversation messages. */
+const SKIP_TYPES = new Set([
+	"progress",
+	"file-history-snapshot",
+	"queue-operation",
+	"last-prompt",
+	"system",
+]);
+
+function getClaudeProjectsDirs(): string[] {
 	const h = home();
 	return findExistingDirs([
-		join(h, ".claude"),
-		join(h, ".claude-code"),
-		join(h, ".claude-local"),
-		join(h, ".claude-m2"),
-		join(h, ".claude-zai"),
+		join(h, ".claude", "projects"),
+		join(h, ".claude-code", "projects"),
+		join(h, ".claude-local", "projects"),
 	]);
 }
 
@@ -35,17 +57,10 @@ export const claudePlugin: SourcePlugin = {
 	name: "claude",
 
 	async listSessions(): Promise<string[]> {
-		const dirs = getClaudeDirs();
+		const projectsDirs = getClaudeProjectsDirs();
 		const files: string[] = [];
-		for (const dir of dirs) {
-			const projectsDir = join(dir, "projects");
-			files.push(
-				...findFiles(projectsDir, (name) => name.endsWith(".jsonl") && !name.startsWith("agent-")),
-			);
-			// Also check direct JSONL files
-			files.push(
-				...findFiles(dir, (name) => name.endsWith(".jsonl") && !name.startsWith("agent-")),
-			);
+		for (const projectsDir of projectsDirs) {
+			files.push(...findFiles(projectsDir, (name) => name.endsWith(".jsonl")));
 		}
 		return files;
 	},
@@ -57,22 +72,55 @@ export const claudePlugin: SourcePlugin = {
 	},
 };
 
+/** Envelope shape for every line in a Claude JSONL session file. */
+interface ClaudeEntry {
+	parentUuid?: string | null;
+	isSidechain?: boolean;
+	userType?: string;
+	cwd?: string;
+	sessionId?: string;
+	version?: string;
+	type?: string;
+	message?: {
+		role?: string;
+		model?: string;
+		content?: string | ContentBlock[];
+	};
+	timestamp?: string;
+	uuid?: string;
+}
+
+interface ContentBlock {
+	type: string;
+	text?: string;
+	thinking?: string;
+	name?: string;
+	id?: string;
+	input?: Record<string, unknown>;
+	signature?: string;
+}
+
 function claudeEntriesToCanonical(entries: unknown[], filePath: string): CanonicalSession {
 	const messages: CanonicalMessage[] = [];
 	let projectPath: string | undefined;
+	let sessionId: string | undefined;
 
 	for (const entry of entries) {
-		const e = entry as Record<string, any>;
+		const e = entry as ClaudeEntry;
 		const type = e.type;
 
+		// Extract cwd and sessionId from any entry that has them
+		if (e.cwd && !projectPath) projectPath = e.cwd;
+		if (e.sessionId && !sessionId) sessionId = e.sessionId;
+
+		// Skip non-message types
+		if (!type || SKIP_TYPES.has(type)) continue;
+		if (!MESSAGE_TYPES.has(type)) continue;
+
 		if (type === "user") {
-			const msg = e.message ?? e;
-			const content =
-				typeof msg.content === "string"
-					? msg.content
-					: typeof msg.message?.content === "string"
-						? msg.message.content
-						: "";
+			const msg = e.message;
+			if (!msg) continue;
+			const content = typeof msg.content === "string" ? msg.content : "";
 			if (content) {
 				messages.push({
 					role: "user",
@@ -80,45 +128,34 @@ function claudeEntriesToCanonical(entries: unknown[], filePath: string): Canonic
 					timestamp: e.timestamp,
 				});
 			}
-			if (e.cwd) projectPath = e.cwd;
 		} else if (type === "assistant") {
-			const msg = e.message ?? e;
-			const parts: string[] = [];
-			const contentArr = msg.content ?? msg.message?.content;
+			const msg = e.message;
+			if (!msg) continue;
+
+			const textParts: string[] = [];
+			const contentArr = msg.content;
+
 			if (Array.isArray(contentArr)) {
-				for (const c of contentArr) {
-					if (c.type === "text") parts.push(c.text);
+				for (const block of contentArr) {
+					if (block.type === "text" && block.text) {
+						textParts.push(block.text);
+					}
+					// Skip "thinking" and "tool_use" blocks for the text content.
+					// tool_use blocks represent tool calls, not displayable text.
 				}
 			} else if (typeof contentArr === "string") {
-				parts.push(contentArr);
+				textParts.push(contentArr);
 			}
-			const content = parts.join("\n");
+
+			const content = textParts.join("\n");
 			if (content) {
 				messages.push({
 					role: "assistant",
 					content,
 					timestamp: e.timestamp,
-					model: msg.model ?? msg.message?.model,
+					model: msg.model,
 				});
 			}
-		} else if (type === "tool_result") {
-			const result = e.toolResult ?? e;
-			const content =
-				typeof result.content === "string"
-					? result.content
-					: Array.isArray(result.content)
-						? result.content
-								.filter((c: any) => c.type === "text")
-								.map((c: any) => c.text)
-								.join("\n")
-						: "";
-			messages.push({
-				role: "tool-result",
-				content,
-				timestamp: e.timestamp,
-				toolName: result.toolName,
-				toolCallId: result.toolCallId,
-			});
 		}
 	}
 
@@ -127,7 +164,7 @@ function claudeEntriesToCanonical(entries: unknown[], filePath: string): Canonic
 	}
 
 	return {
-		id: sessionIdFromPath(filePath),
+		id: sessionId ?? sessionIdFromPath(filePath),
 		source: "claude",
 		messages,
 		projectPath,

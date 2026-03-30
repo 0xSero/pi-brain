@@ -15,6 +15,7 @@
 export type {
 	PiBrainConfig,
 	PrivacyConfig,
+	AnonymizeConfig,
 	ReviewerConfig,
 	ExportConfig,
 	ExportFormat,
@@ -24,7 +25,11 @@ export type {
 	HttpUploadConfig,
 	RedactionCategory,
 } from "./configs/types.js";
-export { resolveConfig, ALL_REDACTION_CATEGORIES } from "./configs/defaults.js";
+export {
+	resolveConfig,
+	ALL_REDACTION_CATEGORIES,
+	DEFAULT_ANONYMIZE_CONFIG,
+} from "./configs/defaults.js";
 
 // -- Data processing types --
 export type {
@@ -55,6 +60,8 @@ export type {
 
 // -- Privacy functions --
 export { detectAll } from "./privacy/detectors.js";
+export { anonymize } from "./privacy/anonymizer.js";
+export type { AnonymizeResult } from "./privacy/anonymizer.js";
 export { sanitize } from "./privacy/redactor.js";
 export { review } from "./privacy/reviewer.js";
 

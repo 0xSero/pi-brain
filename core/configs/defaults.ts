@@ -11,6 +11,7 @@
  */
 
 import type {
+	AnonymizeConfig,
 	ExportConfig,
 	ExportFormat,
 	PiBrainConfig,
@@ -40,6 +41,15 @@ export const DEFAULT_PRIVACY_CONFIG: Required<PrivacyConfig> = {
 	customPatterns: {},
 };
 
+/** Default anonymization configuration. */
+export const DEFAULT_ANONYMIZE_CONFIG: Required<AnonymizeConfig> = {
+	timestampJitterMs: 30 * 60 * 1000,
+	additionalStrips: [],
+	anonymizeIds: true,
+	fuzzTimestamps: true,
+	stripPaths: true,
+};
+
 /** Default reviewer configuration (off by default). */
 export const DEFAULT_REVIEWER_CONFIG: Required<ReviewerConfig> = {
 	enabled: false,
@@ -61,6 +71,7 @@ export const DEFAULT_EXPORT_CONFIG: Required<ExportConfig> = {
  */
 export function resolveConfig(partial?: PiBrainConfig): {
 	privacy: Required<PrivacyConfig>;
+	anonymize: Required<AnonymizeConfig>;
 	reviewer: Required<ReviewerConfig>;
 	export: Required<ExportConfig>;
 	upload: PiBrainConfig["upload"];
@@ -69,6 +80,10 @@ export function resolveConfig(partial?: PiBrainConfig): {
 		privacy: {
 			...DEFAULT_PRIVACY_CONFIG,
 			...(partial?.privacy ?? {}),
+		},
+		anonymize: {
+			...DEFAULT_ANONYMIZE_CONFIG,
+			...(partial?.anonymize ?? {}),
 		},
 		reviewer: {
 			...DEFAULT_REVIEWER_CONFIG,

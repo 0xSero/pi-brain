@@ -8,14 +8,21 @@
  * /dataset-export, /dataset-upload, /dataset-config.
  */
 
-import { join } from "node:path";
+import { createHash } from "node:crypto";
+import { readFile } from "node:fs/promises";
+import { join, resolve } from "node:path";
 
 import {
-	type CanonicalSession,
+	type ExportArtifact,
+	type ExportBundle,
+	type ExportFormat,
 	type SourcePlugin,
+	type UploadConfig,
+	anonymize,
 	createBundle,
 	resolveConfig,
 	sanitize,
+	upload,
 	writeBundle,
 } from "./core/index.js";
 
@@ -80,14 +87,14 @@ async function runExport(args: string[]): Promise<void> {
 	}
 
 	const config = resolveConfig();
-	const sessions: CanonicalSession[] = [];
+	const sessions = [];
 	let errors = 0;
 
 	for (const ref of refs) {
 		try {
 			const session = await plugin.loadSession(ref);
 			const { session: sanitized } = sanitize(session, config.privacy);
-			sessions.push(sanitized as unknown as CanonicalSession);
+			sessions.push(sanitized);
 		} catch (err) {
 			errors++;
 			console.error(`  Skipping ${ref}: ${err instanceof Error ? err.message : err}`);
@@ -101,29 +108,56 @@ async function runExport(args: string[]): Promise<void> {
 		return;
 	}
 
+	const anonymized = anonymize(sessions, config.anonymize);
 	const timestamp = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
 	const outputDir = config.export.outputDir || join(".pi-private-data", "exports", timestamp);
 
-	const bundle = createBundle(sessions as any, config.export);
+	const bundle = createBundle(anonymized.sessions, config.export);
 	await writeBundle(bundle, outputDir);
 
 	console.log(`Exported to ${outputDir}/`);
 	console.log(`  Sessions: ${bundle.metadata.sessionCount}`);
 	console.log(`  Messages: ${bundle.metadata.messageCount}`);
 	console.log(`  Formats: ${bundle.metadata.formats.join(", ")}`);
+	console.log(`  Anonymized IDs: ${anonymized.stats.idsAnonymized}`);
+	console.log(`  Stripped paths: ${anonymized.stats.pathsStripped}`);
+	console.log(`  Fuzzed timestamps: ${anonymized.stats.timestampsFuzzed}`);
+	console.log(`  Stripped strings: ${anonymized.stats.stringsStripped}`);
 	console.log(`  Hash: ${bundle.manifestHash.slice(0, 16)}...`);
+
+	if (config.upload) {
+		const result = await upload(bundle, config.upload);
+		console.log(`Upload: ${result.success ? "success" : "failed"} - ${result.message}`);
+		if (result.url) {
+			console.log(`  URL: ${result.url}`);
+		}
+		if (!result.success) {
+			process.exit(1);
+		}
+	}
 }
 
 async function runUpload(args: string[]): Promise<void> {
 	const bundleDir = args[0];
 	if (!bundleDir) {
-		console.error("Usage: pi-brain upload <bundle-dir> [--target huggingface --repo user/name]");
+		console.error(
+			"Usage: pi-brain upload <bundle-dir> --target huggingface --repo user/name [--public]",
+		);
+		console.error("   or: pi-brain upload <bundle-dir> --target http --url https://...");
 		process.exit(1);
 	}
 
-	// For now, just explain what would happen
-	console.log(`Upload from ${bundleDir} — configure target with --target and --repo flags.`);
-	console.log("Upload support requires config. See docs/design.md for details.");
+	const config = parseUploadArgs(args.slice(1));
+	const bundle = await readBundle(bundleDir);
+	const result = await upload(bundle, config);
+
+	console.log(`Upload: ${result.success ? "success" : "failed"} - ${result.message}`);
+	if (result.url) {
+		console.log(`URL: ${result.url}`);
+	}
+	if (!result.success) {
+		process.exit(1);
+	}
 }
 
 async function runList(args: string[]): Promise<void> {
@@ -155,7 +189,8 @@ function printHelp(): void {
 
 Usage:
   pi-brain export [source]     Export sessions (default source: pi)
-  pi-brain upload <dir>        Upload an exported bundle
+  pi-brain upload <dir> --target huggingface --repo user/name [--public]
+  pi-brain upload <dir> --target http --url https://...
   pi-brain list [source]       List available sessions
   pi-brain help                Show this help
 
@@ -165,6 +200,113 @@ Environment variables:
   PI_BRAIN_REVIEWER_API_KEY    API key for structured review
   HF_TOKEN                     Hugging Face token for uploads
 `);
+}
+
+function parseUploadArgs(args: string[]): UploadConfig {
+	let target: string | undefined;
+	let repo: string | undefined;
+	let url: string | undefined;
+	let visibility: "private" | "public" = "private";
+
+	for (let index = 0; index < args.length; index++) {
+		const arg = args[index];
+		switch (arg) {
+			case "--target":
+				target = args[++index];
+				break;
+			case "--repo":
+				repo = args[++index];
+				break;
+			case "--url":
+				url = args[++index];
+				break;
+			case "--public":
+				visibility = "public";
+				break;
+			default:
+				console.error(`Unknown upload flag: ${arg}`);
+				process.exit(1);
+		}
+	}
+
+	if (target === "huggingface") {
+		if (!repo) {
+			console.error("Missing required flag: --repo user/name");
+			process.exit(1);
+		}
+		return {
+			type: "huggingface",
+			repo,
+			visibility,
+		};
+	}
+
+	if (target === "http") {
+		if (!url) {
+			console.error("Missing required flag: --url https://...");
+			process.exit(1);
+		}
+		return {
+			type: "http",
+			url,
+		};
+	}
+
+	console.error("Missing or unsupported --target. Use 'huggingface' or 'http'.");
+	process.exit(1);
+}
+
+async function readBundle(bundleDir: string): Promise<ExportBundle> {
+	const resolvedDir = resolve(bundleDir);
+	const manifestPath = join(resolvedDir, "manifest.json");
+	const manifest = JSON.parse(await readFile(manifestPath, "utf-8")) as {
+		hash: string;
+		createdAt: string;
+		metadata: ExportBundle["metadata"];
+		files: string[];
+	};
+
+	const artifacts: ExportArtifact[] = await Promise.all(
+		manifest.files.map(async (fileName) => {
+			const content = await readFile(join(resolvedDir, fileName), "utf-8");
+			return {
+				format: fileNameToFormat(fileName),
+				fileName,
+				content,
+			};
+		}),
+	);
+
+	const computedHash = createHash("sha256")
+		.update(artifacts.map((artifact) => artifact.content).join(""))
+		.digest("hex");
+
+	if (computedHash !== manifest.hash) {
+		throw new Error(
+			`Bundle manifest hash mismatch: expected ${manifest.hash}, got ${computedHash}`,
+		);
+	}
+
+	return {
+		artifacts,
+		manifestHash: manifest.hash,
+		createdAt: manifest.createdAt,
+		metadata: manifest.metadata,
+	};
+}
+
+function fileNameToFormat(fileName: string): ExportFormat {
+	switch (fileName) {
+		case "sessions.jsonl":
+			return "sessions";
+		case "sft.jsonl":
+			return "sft-jsonl";
+		case "chatml.jsonl":
+			return "chatml";
+		default:
+			console.error(`Unsupported artifact in bundle: ${fileName}`);
+			process.exit(1);
+	}
 }
 
 main().catch((err) => {

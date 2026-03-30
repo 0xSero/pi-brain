@@ -11,10 +11,18 @@
  * - Dry-run mode writes proof to test-output/ instead of actually uploading.
  */
 
+import { execFile } from "node:child_process";
+import { mkdtemp, readdir, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { promisify } from "node:util";
+
 import type { HttpUploadConfig, HuggingFaceUploadConfig, UploadConfig } from "../configs/types.js";
 import type { ExportBundle } from "../data-processing/types.js";
 import { postJson, uploadMultipart } from "./http-client.js";
 import type { UploadResult } from "./types.js";
+
+const execFileAsync = promisify(execFile);
 
 /**
  * Upload a bundle to the configured target.
@@ -67,76 +75,204 @@ async function uploadToHuggingFace(
 	}
 
 	const visibility = config.visibility ?? "private";
+	const gitUpload = await uploadToHuggingFaceWithGit(
+		bundle,
+		config.repo,
+		token,
+		visibility,
+		timestamp,
+	);
+	if (gitUpload.success) {
+		return {
+			success: true,
+			message: `Uploaded ${bundle.artifacts.length + 1} file(s) to ${config.repo} (${visibility})`,
+			targetType: "huggingface",
+			url: `https://huggingface.co/datasets/${config.repo}`,
+			timestamp,
+		};
+	}
+
 	const headers = { Authorization: `Bearer ${token}` };
+	const manifestContent = JSON.stringify(
+		{
+			hash: bundle.manifestHash,
+			createdAt: bundle.createdAt,
+			metadata: bundle.metadata,
+			files: bundle.artifacts.map((artifact) => artifact.fileName),
+		},
+		null,
+		2,
+	);
+	const commitPayload = {
+		summary: `Upload pi-brain export ${timestamp}`,
+		description: `Upload ${bundle.artifacts.length} artifact(s) from pi-brain`,
+		files: [
+			...bundle.artifacts.map((artifact) => ({
+				path: artifact.fileName,
+				content: artifact.content,
+				encoding: "utf-8",
+			})),
+			{
+				path: "manifest.json",
+				content: manifestContent,
+				encoding: "utf-8",
+			},
+		],
+	};
+	const commitUrl = `https://huggingface.co/api/datasets/${config.repo}/commit/main`;
 
-	// Upload each artifact as a file to the dataset repo
-	for (const artifact of bundle.artifacts) {
-		const commitUrl = `https://huggingface.co/api/datasets/${config.repo}/upload/main/${artifact.fileName}`;
+	const commit = async () => postJson(commitUrl, commitPayload, headers);
+	let response = await commit();
 
-		const response = await uploadMultipart(
-			commitUrl,
-			artifact.fileName,
-			artifact.content,
-			undefined,
+	if (!response.ok && response.status === 404) {
+		const createResp = await postJson(
+			"https://huggingface.co/api/repos/create",
+			{
+				type: "dataset",
+				name: config.repo.split("/").pop(),
+				private: visibility === "private",
+			},
 			headers,
 		);
 
-		if (!response.ok) {
-			// Try creating the repo first if it doesn't exist
-			if (response.status === 404) {
-				const createResp = await postJson(
-					"https://huggingface.co/api/repos/create",
-					{
-						type: "dataset",
-						name: config.repo.split("/").pop(),
-						private: visibility === "private",
-					},
-					headers,
-				);
-
-				if (!createResp.ok && createResp.status !== 409) {
-					return {
-						success: false,
-						message: `Failed to create HF repo: ${createResp.body}`,
-						targetType: "huggingface",
-						timestamp,
-					};
-				}
-
-				// Retry upload
-				const retry = await uploadMultipart(
-					commitUrl,
-					artifact.fileName,
-					artifact.content,
-					undefined,
-					headers,
-				);
-				if (!retry.ok) {
-					return {
-						success: false,
-						message: `HF upload failed after repo creation: ${retry.body}`,
-						targetType: "huggingface",
-						timestamp,
-					};
-				}
-			} else {
-				return {
-					success: false,
-					message: `HF upload failed (${response.status}): ${response.body}`,
-					targetType: "huggingface",
-					timestamp,
-				};
-			}
+		if (!createResp.ok && createResp.status !== 409) {
+			return {
+				success: false,
+				message: `Failed to create HF repo: ${createResp.body}`,
+				targetType: "huggingface",
+				timestamp,
+			};
 		}
+
+		response = await commit();
+	}
+
+	if (!response.ok) {
+		return {
+			success: false,
+			message: `${gitUpload.message}\nFallback API error (${response.status}): ${response.body}`,
+			targetType: "huggingface",
+			timestamp,
+		};
 	}
 
 	return {
 		success: true,
-		message: `Uploaded ${bundle.artifacts.length} file(s) to ${config.repo} (${visibility})`,
+		message: `Uploaded ${bundle.artifacts.length + 1} file(s) to ${config.repo} (${visibility})`,
 		targetType: "huggingface",
 		url: `https://huggingface.co/datasets/${config.repo}`,
 		timestamp,
 	};
+}
+
+async function uploadToHuggingFaceWithGit(
+	bundle: ExportBundle,
+	repo: string,
+	token: string,
+	visibility: "private" | "public",
+	timestamp: string,
+): Promise<{ success: true } | { success: false; message: string }> {
+	const tempDir = await mkdtemp(join(tmpdir(), "pi-brain-hf-"));
+	const repoDir = join(tempDir, "repo");
+	const headers = { Authorization: `Bearer ${token}` };
+	const manifest = JSON.stringify(
+		{
+			hash: bundle.manifestHash,
+			createdAt: bundle.createdAt,
+			metadata: bundle.metadata,
+			files: bundle.artifacts.map((artifact) => artifact.fileName),
+		},
+		null,
+		2,
+	);
+
+	try {
+		const createResp = await postJson(
+			"https://huggingface.co/api/repos/create",
+			{
+				type: "dataset",
+				name: repo.split("/").pop(),
+				private: visibility === "private",
+			},
+			headers,
+		);
+		if (!createResp.ok && createResp.status !== 409) {
+			return { success: false, message: `Failed to create repo: ${createResp.body}` };
+		}
+
+		await execFileAsync(
+			"git",
+			["clone", `https://user:${token}@huggingface.co/datasets/${repo}`, repoDir],
+			{
+				env: {
+					...process.env,
+					GIT_LFS_SKIP_SMUDGE: "1",
+				},
+				maxBuffer: 50 * 1024 * 1024,
+			},
+		);
+		await execFileAsync("git", ["lfs", "install", "--local"], { cwd: repoDir });
+		await execFileAsync("git", ["lfs", "track", "*.jsonl"], { cwd: repoDir });
+
+		for (const entry of await readdir(repoDir, { withFileTypes: true })) {
+			if (entry.name === ".git" || entry.name === ".gitattributes") {
+				continue;
+			}
+
+			await rm(join(repoDir, entry.name), { recursive: true, force: true });
+		}
+
+		for (const artifact of bundle.artifacts) {
+			await writeFile(join(repoDir, artifact.fileName), artifact.content, "utf-8");
+		}
+		await writeFile(join(repoDir, "manifest.json"), manifest, "utf-8");
+
+		const gitEnv = {
+			...process.env,
+			GIT_AUTHOR_NAME: "pi-brain",
+			GIT_AUTHOR_EMAIL: "pi-brain@local",
+			GIT_COMMITTER_NAME: "pi-brain",
+			GIT_COMMITTER_EMAIL: "pi-brain@local",
+		};
+		await execFileAsync("git", ["add", "."], { cwd: repoDir, env: gitEnv });
+
+		const status = await execFileAsync("git", ["status", "--porcelain"], {
+			cwd: repoDir,
+			env: gitEnv,
+		});
+		if (!status.stdout.trim()) {
+			return { success: true };
+		}
+
+		await execFileAsync("git", ["commit", "-m", `Upload pi-brain export ${timestamp}`], {
+			cwd: repoDir,
+			env: gitEnv,
+			maxBuffer: 50 * 1024 * 1024,
+		});
+		await execFileAsync("git", ["push", "origin", "HEAD:main"], {
+			cwd: repoDir,
+			env: gitEnv,
+			maxBuffer: 50 * 1024 * 1024,
+		});
+
+		return { success: true };
+	} catch (error) {
+		const stdout =
+			error instanceof Error && "stdout" in error
+				? String((error as { stdout?: string }).stdout ?? "")
+				: "";
+		const stderr =
+			error instanceof Error && "stderr" in error
+				? String((error as { stderr?: string }).stderr ?? "")
+				: "";
+		const detail = [stdout.trim(), stderr.trim()].filter(Boolean).join("\n");
+		return {
+			success: false,
+			message: detail ? `Git/LFS upload failed: ${detail}` : "Git/LFS upload failed",
+		};
+	} finally {
+		await rm(tempDir, { recursive: true, force: true });
+	}
 }
 
 /** Upload to a generic HTTP endpoint. */
