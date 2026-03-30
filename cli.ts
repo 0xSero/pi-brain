@@ -30,6 +30,7 @@ import { claudePlugin } from "./plugins/claude/index.js";
 import { codexPlugin } from "./plugins/codex/index.js";
 import { cursorPlugin } from "./plugins/cursor/index.js";
 import { factoryPlugin } from "./plugins/factory/index.js";
+import { hermesPlugin } from "./plugins/hermes/index.js";
 import { opencodePlugin } from "./plugins/opencode/index.js";
 import { piPlugin } from "./plugins/pi/index.js";
 
@@ -41,6 +42,7 @@ const PLUGINS: Record<string, SourcePlugin> = {
 	opencode: opencodePlugin,
 	cursor: cursorPlugin,
 	factory: factoryPlugin,
+	hermes: hermesPlugin,
 };
 
 async function main(): Promise<void> {
