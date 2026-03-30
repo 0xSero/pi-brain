@@ -297,7 +297,7 @@ async function readBundle(bundleDir: string): Promise<ExportBundle> {
 
 function fileNameToFormat(fileName: string): ExportFormat {
 	switch (fileName) {
-		case "sessions.json":
+		case "sessions.jsonl":
 			return "sessions";
 		case "sft.jsonl":
 			return "sft-jsonl";

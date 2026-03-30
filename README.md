@@ -35,9 +35,34 @@ pi-brain export cursor
 
 When installed as a Pi package, these commands are available inside Pi:
 
-- `/dataset-export` — Export current/history sessions
-- `/dataset-upload` — Upload an exported bundle
-- `/dataset-config` — Manage settings
+- `/export-local` — Export sanitized Pi sessions to disk
+- `/export-public` — Export sanitized Pi sessions and publish to Hugging Face
+- `/export` — TUI alias that asks local vs public, then current vs all
+
+Both commands open a TUI picker when you omit the scope. You can also skip the picker with `--current` or `--all`.
+
+`/export-public` reads defaults from `~/.pi/agent/pi-brain.json` when present:
+
+```json
+{
+  "huggingface": {
+    "repo": "0xSero/pi-brain-private-publish-test",
+    "visibility": "private"
+  },
+  "export": {
+    "formats": ["sessions"]
+  }
+}
+```
+
+You can still override these per command, for example:
+
+```text
+/export-local --format=sessions,chatml
+/export-local --all
+/export-public --repo 0xSero/my-dataset --public
+/export-public --all
+```
 
 ## Architecture
 
