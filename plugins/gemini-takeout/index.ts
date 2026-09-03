@@ -1,13 +1,14 @@
 /**
  * @file plugins/gemini-takeout/index.ts
  *
- * Google Gemini Takeout source plugin — parses MiActividad.html files
+ * Google Gemini Takeout source plugin — parses My Activity HTML files
  * from Google Takeout archives and converts Gemini conversations to
  * CanonicalSession format.
  *
  * Google Takeout structure (after extracting the ZIP):
- *   Takeout/Gemini/MiActividad.html — main Gemini conversations
- *   Takeout/Gemini/Modo IA/MiActividad.html — AI Mode queries
+ *   Takeout/Gemini/MyActivity.html — English exports
+ *   Takeout/Gemini/MiActividad.html — Spanish exports
+ *   Takeout/Gemini/AI Mode/ or Modo IA/ — AI Mode queries
  *
  * Each conversation in the HTML follows this pattern:
  *   - User prompt text
@@ -18,34 +19,39 @@
  * Takeout ZIP files placed in the exports directory.
  */
 
-import { readFileSync, existsSync, readdirSync, statSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import type { CanonicalMessage, CanonicalSession, SourcePlugin } from "../../core/index.js";
-import {
-	dirExists,
-	findFiles,
-	home,
-	sessionIdFromPath,
-} from "../helpers.js";
+import { findExistingDirs, findFiles, home, sessionIdFromPath } from "../helpers.js";
+
+const ACTIVITY_FILENAMES = new Set(["miactividad.html", "myactivity.html"]);
+
+/** True for Gemini Takeout activity HTML (locale-neutral). */
+export function isGeminiActivityFile(name: string): boolean {
+	const lower = name.toLowerCase();
+	return ACTIVITY_FILENAMES.has(lower) || lower.endsWith("-gemini.html");
+}
 
 /**
- * Google Takeout typically stores Gemini data here after extraction.
- * Users can also place the ZIP in an exports/ directory.
+ * Bounded roots only — never recurse all of ~/Downloads.
+ * Override with PI_BRAIN_TAKEOUT_DIR.
  */
-const TAKEOUT_DIRS = [
-	join(home(), "Downloads"),
-	join(home(), "Takeout"),
-];
+export function geminiTakeoutSearchRoots(): string[] {
+	const extra = process.env.PI_BRAIN_TAKEOUT_DIR;
+	return findExistingDirs(
+		[join(home(), "Takeout"), join(home(), "Downloads", "Takeout"), extra].filter(
+			(value): value is string => Boolean(value),
+		),
+	);
+}
 
 export const geminiTakeoutPlugin: SourcePlugin = {
 	name: "gemini-takeout",
 
 	async listSessions(): Promise<string[]> {
 		const files: string[] = [];
-		for (const dir of TAKEOUT_DIRS) {
-			if (dirExists(dir)) {
-				files.push(...findGeminiHtmlFiles(dir));
-			}
+		for (const dir of geminiTakeoutSearchRoots()) {
+			files.push(...findFiles(dir, isGeminiActivityFile));
 		}
 		return files;
 	},
@@ -56,40 +62,6 @@ export const geminiTakeoutPlugin: SourcePlugin = {
 		return parseGeminiHtml(content, filePath);
 	},
 };
-
-/**
- * Find Gemini Takeout HTML files in a directory tree.
- */
-function findGeminiHtmlFiles(dir: string): string[] {
-	const results: string[] = [];
-	if (!existsSync(dir)) return results;
-
-	const walk = (current: string) => {
-		let items: string[];
-		try {
-			items = readdirSync(current);
-		} catch {
-			return;
-		}
-
-		for (const item of items) {
-			const full = join(current, item);
-			try {
-				const stat = statSync(full);
-				if (stat.isDirectory()) {
-					walk(full);
-				} else if (item === "MiActividad.html" || item.endsWith("-Gemini.html")) {
-					results.push(full);
-				}
-			} catch {
-				// skip inaccessible files
-			}
-		}
-	};
-
-	walk(dir);
-	return results;
-}
 
 /**
  * Parse a Gemini Takeout HTML file into CanonicalSession(s).
@@ -123,7 +95,12 @@ function parseGeminiHtml(html: string, filePath: string): CanonicalSession {
 	}
 
 	// Determine source type from path
-	const isModoIA = filePath.toLowerCase().includes("modo ia");
+	const lowerPath = filePath.toLowerCase();
+	const isModoIA =
+		lowerPath.includes("modo ia") ||
+		lowerPath.includes("ai mode") ||
+		lowerPath.includes("/ai_mode/") ||
+		lowerPath.includes("\\ai_mode\\");
 	const source = isModoIA ? "gemini-takeout-ai-mode" : "gemini-takeout";
 
 	return {

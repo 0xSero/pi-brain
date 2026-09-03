@@ -109,7 +109,7 @@ See [docs/design.md](docs/design.md) for the full architecture.
 | OpenCode | Complete | `~/.local/share/opencode/` or `~/Library/Application Support/opencode/` |
 | Cursor | Complete | Reads pre-extracted JSONL from `~/extracted_data/` |
 | Factory | Complete | `~/.factory/sessions/` |
-| **Gemini Takeout** | **New** | Google Takeout ZIP → `Takeout/Gemini/MiActividad.html` |
+| **Gemini Takeout** | **New** | `~/Takeout` or `~/Downloads/Takeout` → `Gemini/MyActivity.html` (or `MiActividad.html`) |
 | **Qwen Code** | **New** | `~/.qwen/projects/*/chats/` |
 
 ### Gemini Takeout
@@ -121,10 +121,10 @@ Extract your Gemini conversations from Google Takeout:
 3. Export sessions:
 
 ```bash
-pi-brain export gemini-takeout --path /path/to/Takeout/Gemini/MiActividad.html
+pi-brain export gemini-takeout --path /path/to/Takeout/Gemini/MyActivity.html
 ```
 
-The parser handles large MiActividad.html files (60MB+) with streaming extraction and automatically separates user prompts from assistant responses.
+The parser handles large My Activity HTML files (60MB+) with streaming extraction and automatically separates user prompts from assistant responses. Auto-discovery looks only at `~/Takeout` and `~/Downloads/Takeout` (not all of Downloads). Set `PI_BRAIN_TAKEOUT_DIR` to add another root.
 
 ### Qwen Code
 
