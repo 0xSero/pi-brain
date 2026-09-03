@@ -2,7 +2,7 @@
 
 Privacy-first dataset extraction from AI coding sessions.
 
-A Pi package with a thin Pi extension on top of a source-agnostic TypeScript core. Extract sessions from Pi, Claude Code, Codex, OpenCode, and Cursor, sanitize them locally, optionally run structured review, export to training formats, and upload to Hugging Face or custom HTTP targets.
+A Pi package with a thin Pi extension on top of a source-agnostic TypeScript core. Extract sessions from Pi, Claude Code, Codex, OpenCode, Cursor, Factory, Google Gemini Takeout, and Qwen Code — sanitize them locally, optionally run structured review, export to training formats, and upload to Hugging Face or custom HTTP targets.
 
 ## Quick Start
 
@@ -29,6 +29,9 @@ pi-brain export claude
 pi-brain export codex
 pi-brain export opencode
 pi-brain export cursor
+pi-brain export factory
+pi-brain export gemini-takeout
+pi-brain export qwen-code
 ```
 
 ### Pi Extension Commands
@@ -105,7 +108,35 @@ See [docs/design.md](docs/design.md) for the full architecture.
 | Codex | Complete | `~/.codex/sessions/` |
 | OpenCode | Complete | `~/.local/share/opencode/` or `~/Library/Application Support/opencode/` |
 | Cursor | Complete | Reads pre-extracted JSONL from `~/extracted_data/` |
-| Factory | Stub | Not yet supported (awaiting format documentation) |
+| Factory | Complete | `~/.factory/sessions/` |
+| **Gemini Takeout** | **New** | `~/Takeout` or `~/Downloads/Takeout` → `Gemini/MyActivity.html` (or `MiActividad.html`) |
+| **Qwen Code** | **New** | `~/.qwen/projects/*/chats/` |
+
+### Gemini Takeout
+
+Extract your Gemini conversations from Google Takeout:
+
+1. Download your Gemini data from [Google Takeout](https://takeout.google.com/settings/takeout)
+2. Extract the ZIP to a location on your machine
+3. Export sessions:
+
+```bash
+pi-brain export gemini-takeout --path /path/to/Takeout/Gemini/MyActivity.html
+```
+
+The parser handles large My Activity HTML files (60MB+) with streaming extraction and automatically separates user prompts from assistant responses. Auto-discovery looks only at `~/Takeout` and `~/Downloads/Takeout` (not all of Downloads). Set `PI_BRAIN_TAKEOUT_DIR` to add another root.
+
+### Qwen Code
+
+Qwen Code sessions are auto-discovered from `~/.qwen/projects/`:
+
+```bash
+# List all Qwen Code sessions
+pi-brain list
+
+# Export a specific session
+pi-brain export qwen-code --ref "<session-id>"
+```
 
 ## Privacy Guarantees
 

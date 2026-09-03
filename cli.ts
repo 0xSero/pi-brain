@@ -30,9 +30,11 @@ import { claudePlugin } from "./plugins/claude/index.js";
 import { codexPlugin } from "./plugins/codex/index.js";
 import { cursorPlugin } from "./plugins/cursor/index.js";
 import { factoryPlugin } from "./plugins/factory/index.js";
+import { geminiTakeoutPlugin } from "./plugins/gemini-takeout/index.js";
 import { hermesPlugin } from "./plugins/hermes/index.js";
 import { opencodePlugin } from "./plugins/opencode/index.js";
 import { piPlugin } from "./plugins/pi/index.js";
+import { qwenCodePlugin } from "./plugins/qwen-code/index.js";
 
 /** All available source plugins. */
 const PLUGINS: Record<string, SourcePlugin> = {
@@ -43,6 +45,8 @@ const PLUGINS: Record<string, SourcePlugin> = {
 	cursor: cursorPlugin,
 	factory: factoryPlugin,
 	hermes: hermesPlugin,
+	"gemini-takeout": geminiTakeoutPlugin,
+	"qwen-code": qwenCodePlugin,
 };
 
 async function main(): Promise<void> {
