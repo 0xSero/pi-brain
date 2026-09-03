@@ -39,6 +39,9 @@
 		"typescript": "^5.7.3",
 		"vitest": "^3.0.0"
 	},
+	"dependencies": {
+		"sql.js": "^1.14.1"
+	},
 	"author": "0xSero",
 	"license": "MIT",
 	"repository": {

@@ -103,7 +103,7 @@ See [docs/design.md](docs/design.md) for the full architecture.
 | Pi | Complete | `~/.pi/agent/sessions/` |
 | Claude Code | Complete | `~/.claude/projects/` |
 | Codex | Complete | `~/.codex/sessions/` |
-| OpenCode | Complete | `~/.local/share/opencode/` or `~/Library/Application Support/opencode/` |
+| OpenCode | Complete | `~/.local/share/opencode/` or `~/Library/Application Support/opencode/` (`opencode.db` and legacy `storage/` layouts) |
 | Cursor | Complete | Reads pre-extracted JSONL from `~/extracted_data/` |
 | Factory | Stub | Not yet supported (awaiting format documentation) |
 
