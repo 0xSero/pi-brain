@@ -7,7 +7,7 @@
 
 import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { homedir, platform } from "node:os";
-import { join, resolve } from "node:path";
+import { join, resolve, win32 } from "node:path";
 
 /** Detected operating system. */
 export type OSPlatform = "macos" | "linux" | "windows";
@@ -111,7 +111,10 @@ export function parseJsonlString(content: string): unknown[] {
  * Uses the last two path components (parent dir + filename without extension).
  */
 export function sessionIdFromPath(filePath: string): string {
-	const parts = resolve(filePath).split("/");
+	const windows = /^[A-Za-z]:[\\/]/.test(filePath) || filePath.startsWith("\\\\");
+	const parts = (windows ? win32.resolve(filePath) : resolve(filePath)).split(
+		windows ? /[/\\]/ : "/",
+	);
 	const fileName = parts.pop()?.replace(/\.[^.]+$/, "") ?? "unknown";
 	const parent = parts.pop() ?? "unknown";
 	return `${parent}/${fileName}`;
